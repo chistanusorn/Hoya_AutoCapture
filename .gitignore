@@ -1,0 +1,21 @@
+# ผลลัพธ์ที่โปรแกรมสร้างเองตอนใช้งาน
+captures/
+output/
+settings.json
+
+# build
+build/
+dist/
+*.zip
+*.exe
+__pycache__/
+*.pyc
+
+# ไฟล์ dump ตอน debug
+test_out.txt
+test_out.json
+test_out_tracker.txt
+
+# ไฟล์ล็อกของ Word ตอนเปิดเอกสารค้าง
+~$*.docx
+*.docx
