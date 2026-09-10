@@ -50,10 +50,14 @@ def _distance(a, b):
     return sum(abs(x - y) for x, y in zip(a, b)) / len(a)
 
 
+def _ellipsis(text, limit):
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
 class Picker:
     """tables = [(idx, label, จำนวนจุด)]
     load_cb(table_index) -> (slots, {slot_no: bytes รูปที่ฝังอยู่})
-       slots = [(slot_no, ชื่อ, มีรูปแล้วไหม)]
+       slots = [(slot_no, ชื่อ, ข้อความกำกับรูป, มีรูปแล้วไหม)]
     place_cb(table_index, slot_no, path) -> (ok, ข้อความ)
     """
 
@@ -143,10 +147,10 @@ class Picker:
                  bg=BG, fg=BLACK).pack(anchor="w", pady=(0, 4))
 
         wrap = tk.Frame(left, bg=CARD, highlightbackground=LINE, highlightthickness=1,
-                        width=250)
+                        width=290)
         wrap.pack(fill="y", expand=True)
         wrap.pack_propagate(False)
-        self.slot_canvas, self.slot_inner = self._scroller(wrap, width=248)
+        self.slot_canvas, self.slot_inner = self._scroller(wrap, width=288)
 
     def _build_grid(self, body):
         right = tk.Frame(body, bg=BG)
@@ -196,7 +200,7 @@ class Picker:
     def _reload_table(self):
         """อ่านจุดของตารางที่เลือก แล้วเริ่มเทียบรูปในเอกสารใหม่"""
         self.slots, blobs = self.load_cb(self.ti)
-        self.sel = next((i for i, s in enumerate(self.slots) if not s[2]), 0)
+        self.sel = next((i for i, s in enumerate(self.slots) if not s[3]), 0)
         self.doc_sigs = {}
         self._doc_blobs = list(blobs.items())
 
@@ -216,18 +220,26 @@ class Picker:
         for w in self.slot_inner.winfo_children():
             w.destroy()
         self.rows = []
-        for i, (no, name, _has) in enumerate(self.slots):
+        for i, (no, name, caption, _has) in enumerate(self.slots):
             row = tk.Frame(self.slot_inner, bg=CARD, cursor="hand2")
             row.pack(fill="x")
             mark = tk.Label(row, text="○", font=(FONT, 11), bg=CARD, width=3)
             mark.pack(side="left", padx=(8, 0))
-            nm = tk.Label(row, text=f"{no}. {name}", font=(FONT, 10), bg=CARD,
+
+            texts = tk.Frame(row, bg=CARD)
+            texts.pack(side="left", fill="x", expand=True, pady=4)
+            nm = tk.Label(texts, text=f"{no}. {name}", font=(FONT, 10), bg=CARD,
                           fg=BLACK, anchor="w")
-            nm.pack(side="left", fill="x", expand=True, pady=5)
-            for w in (row, mark, nm):
+            nm.pack(fill="x")
+            # ข้อความกำกับรูปในเอกสาร — บอกว่าจุดนี้ต้องเป็นรูปอะไร
+            cap = tk.Label(texts, text=_ellipsis(caption or "", 36), font=(FONT, 8),
+                           bg=CARD, fg=GREY, anchor="w", justify="left")
+            cap.pack(fill="x")
+
+            for w in (row, mark, texts, nm, cap):
                 w.bind("<Button-1>", lambda e, k=i: self.select(k))
             tk.Frame(self.slot_inner, bg=LINE, height=1).pack(fill="x")
-            self.rows.append((row, mark, nm))
+            self.rows.append((row, mark, texts, nm, cap))
 
     def _load_doc_sigs(self, start):
         """ถอดรูปที่ฝังในเอกสารมาทำลายเซ็น — ทีละก้อน ไม่ให้หน้าต่างค้าง"""
@@ -330,7 +342,7 @@ class Picker:
         if lbl is None:
             return
         slot_no = self._slot_of(path_key)
-        name = next((nm for no, nm, _h in self.slots if no == slot_no), None)
+        name = next((nm for no, nm, _c, _h in self.slots if no == slot_no), None)
         lbl.config(text=f"✓ อยู่ที่จุด {name or slot_no}" if slot_no else "")
 
     def _mark_all(self):
@@ -346,7 +358,7 @@ class Picker:
     def select(self, i):
         self.sel = i
         self._refresh_slots()
-        no, name, has = self.slots[i]
+        no, name, _caption, has = self.slots[i]
         if has:
             self.status.config(text=f"{no}. {name} มีรูปแล้ว — คลิกรูปใหม่จะ"
                                     f"แทนที่รูปเดิม (1 จุด = 1 รูป)", fg=AMBER)
@@ -356,7 +368,7 @@ class Picker:
     def place(self, path):
         if not self.slots:
             return
-        no, name, had = self.slots[self.sel]
+        no, name, caption, had = self.slots[self.sel]
 
         ok, msg = self.place_cb(self.ti, no, str(path))
         if not ok:
@@ -364,7 +376,7 @@ class Picker:
             return
 
         self.placed += 1
-        self.slots[self.sel] = (no, name, True)
+        self.slots[self.sel] = (no, name, caption, True)
         # อัปเดตลายเซ็นฝั่งเอกสารเอง ไม่ต้องอ่านไฟล์ .docx ใหม่ทั้งก้อน
         sig = self.file_sigs.get(str(path))
         if sig is not None:
@@ -376,27 +388,27 @@ class Picker:
 
         # ไปจุดว่างถัดไป ถ้าหมดแล้ววนกลับหาจุดว่างที่ค้างอยู่ข้างบน
         nxt = next((i for i in range(self.sel + 1, len(self.slots))
-                    if not self.slots[i][2]), None)
+                    if not self.slots[i][3]), None)
         if nxt is None:
-            nxt = next((i for i, s in enumerate(self.slots) if not s[2]), self.sel)
+            nxt = next((i for i, s in enumerate(self.slots) if not s[3]), self.sel)
         self.sel = nxt
         self._refresh_slots()
 
     def _refresh_slots(self):
-        done = sum(1 for s in self.slots if s[2])
+        done = sum(1 for s in self.slots if s[3])
         self.count_lbl.config(text=f"ใส่รูปแล้ว {done} / {len(self.slots)}")
 
-        for i, (row, mark, nm) in enumerate(self.rows):
+        for i, (row, mark, texts, nm, cap) in enumerate(self.rows):
             cur = (i == self.sel)
             bg = BLUE_BG if cur else CARD
-            if self.slots[i][2]:
+            if self.slots[i][3]:
                 mark.config(text="✓", fg=GREEN)
                 nm.config(fg=GREY)
             else:
                 mark.config(text="○", fg=LINE)
                 nm.config(fg=BLACK)
             nm.config(font=(FONT, 10, "bold") if cur else (FONT, 10))
-            for w in (row, mark, nm):
+            for w in (row, mark, texts, nm, cap):
                 w.config(bg=bg)
 
         self._scroll_to(self.sel)

@@ -85,14 +85,40 @@ def _has_step_row(table, tracker):
     return False
 
 
+def _caption(cell, para_idx):
+    """ข้อความบรรทัดสุดท้ายเหนือรูป — บอกว่ารูปนี้คือรูปอะไร
+
+    ในเอกสารจริงคนเขียนอธิบายไว้เหนือรูปเสมอ (เช่น 'Input username: rx3fogA
+    and password') จึงเจาะจงกว่าคอลัมน์ Description ที่ใช้ร่วมกันทั้งแถว
+    รูปที่วางติดกันโดยไม่มีข้อความคั่นจะได้ข้อความเดียวกัน — แยกด้วยลำดับ (2) (3)
+    """
+    for para in reversed(cell.paragraphs[:para_idx]):
+        text = para.text.strip()
+        if text and text.lower() != PIC:
+            return text
+    return None
+
+
+def _desc_column(table):
+    """คอลัมน์ Description/Action จากแถวหัวตาราง — None ถ้าไม่มี"""
+    if not table.rows:
+        return None
+    for i, cell in enumerate(table.rows[0].cells):
+        head = cell.text.strip().lower()
+        if "description" in head or "action" in head:
+            return i
+    return None
+
+
 def _pic_slots(table, tracker=None):
     """ทุก 'จุดรูป' ในตาราง เรียงตามลำดับที่เจอ — ทั้งที่ยังเป็น <pic>
     และที่วางรูปไปแล้ว เพื่อให้ลำดับ (slot_no) คงที่ ไม่เลื่อนหลังวางรูป
 
     ชื่อ = เลข No. ของแถว ถ้าแถวมีหลาย <pic> เติมลำดับย่อย: 1.1, 1.1 (2)...
 
-    คืน [(cell, ดัชนี paragraph, ชื่อ, มีรูปแล้วไหม)]
+    คืน [(cell, ดัชนี paragraph, ชื่อ, มีรูปแล้วไหม, ข้อความกำกับรูป)]
     """
+    desc_col = _desc_column(table)
     slots = []
     for row in table.rows:
         no = tracker.cell_number(row.cells[0]) if tracker else row.cells[0].text.strip().rstrip(".")
@@ -106,24 +132,32 @@ def _pic_slots(table, tracker=None):
                 elif para.text.strip().lower() == PIC:
                     found.append((cell, pi, False))
 
+        # เอกสารที่ไม่ได้เขียนอธิบายเหนือรูป ยังพอมีคอลัมน์ Description ให้ใช้แทน
+        row_desc = None
+        if desc_col is not None and desc_col < len(row.cells):
+            row_desc = row.cells[desc_col].text.strip().replace("\n", " ") or None
+
         multi = len(found) > 1
         for n, (cell, pi, placed) in enumerate(found, start=1):
             # อันแรกของแถวใช้เลขเปล่า อันถัดไปเติม (2) (3)...
             label = f"{no} ({n})" if multi and n > 1 else no
-            slots.append((cell, pi, label, placed))
+            slots.append((cell, pi, label, placed, _caption(cell, pi) or row_desc))
     return slots
 
 
 def load_slots(template, table_index):
-    """รายการจุดรูปในตารางที่เลือก — คืน [(ลำดับ, ชื่อ, จำนวนรวม, มีรูปแล้วไหม)]"""
+    """รายการจุดรูปในตารางที่เลือก
+
+    คืน [(ลำดับ, ชื่อ, จำนวนรวม, มีรูปแล้วไหม, ข้อความกำกับรูป)]
+    """
     ensure_working_copy(template)
     doc = Document(str(config.word_working(template)))
     table = doc.tables[table_index]
     tracker = NumberingTracker(doc)
     slots = _pic_slots(table, tracker)
     total = len(slots)
-    return [(i + 1, name or f"รูปที่ {i + 1}", total, placed)
-            for i, (_, _, name, placed) in enumerate(slots)]
+    return [(i + 1, name or f"รูปที่ {i + 1}", total, placed, caption)
+            for i, (_, _, name, placed, caption) in enumerate(slots)]
 
 
 def ensure_working_copy(template):
@@ -147,7 +181,7 @@ def place_image(template, table_index, slot_no, image_path):
     if not (1 <= slot_no <= len(slots)):
         return False, f"ไม่พบจุดรูปลำดับที่ {slot_no}"
 
-    cell, para_idx, name, _placed = slots[slot_no - 1]
+    cell, para_idx, name, _placed, _caption = slots[slot_no - 1]
     para = cell.paragraphs[para_idx]
     for run in list(para.runs):
         run.text = ""
@@ -173,8 +207,8 @@ def slot_images(template, table_index):
     parts = doc.part.related_parts
 
     out = {}
-    for i, (cell, para_idx, _name, placed) in enumerate(_pic_slots(table, tracker),
-                                                        start=1):
+    for i, (cell, para_idx, _name, placed, _cap) in enumerate(_pic_slots(table, tracker),
+                                                              start=1):
         if not placed:
             continue
         para = cell.paragraphs[para_idx]
@@ -200,7 +234,7 @@ def revert_image(template, table_index, slot_no):
     if not (1 <= slot_no <= len(slots)):
         return False, f"ไม่พบจุดรูปลำดับที่ {slot_no}"
 
-    cell, para_idx, name, placed = slots[slot_no - 1]
+    cell, para_idx, name, placed, _caption = slots[slot_no - 1]
     if not placed:
         return False, "จุดนี้ยังไม่มีรูป"
 

@@ -194,18 +194,19 @@ class App:
     def _read_items(self):
         """อ่านรายการจากไฟล์ตามโหมด — คืน (steps, shots)
 
-        steps = [(id, name)]  shots = [จำนวนรูปที่ใส่แล้ว]
+        steps = [(id, ชื่อ, ข้อความกำกับรูป)]  shots = [จำนวนรูปที่ใส่แล้ว]
         อ่านจากไฟล์จริง ปิดเปิดใหม่จึงรู้ว่าทำอะไรไปแล้ว
         """
         if self.pic_mode:
             slots = pic_target.load_slots(self.template, self.table_index)
-            steps = [(no, name) for no, name, _total, _placed in slots]
-            shots = [1 if placed else 0 for _no, _name, _total, placed in slots]
+            steps = [(no, name, cap) for no, name, _total, _placed, cap in slots]
+            shots = [1 if s[3] else 0 for s in slots]
         else:
             rows = word_target.load_steps(self.template, self.table_index)
             counts = word_target.count_images(self.template, self.table_index)
-            steps = [(no, name) for no, _ri, name in rows]
-            shots = [counts.get(no, 0) for no, _name in steps]
+            # โหมดขั้นตอน ชื่อขั้นตอนบอกอยู่แล้วว่าคืออะไร ไม่ต้องมีข้อความกำกับซ้ำ
+            steps = [(no, name, None) for no, _ri, name in rows]
+            shots = [counts.get(no, 0) for no, _name, _cap in steps]
         return steps, shots
 
     def _load_document(self):
@@ -288,6 +289,12 @@ class App:
                                  justify="left")
         self.now_name.pack(side="left", padx=(12, 0))
 
+        # ข้อความที่คนเขียนกำกับไว้เหนือรูปในเอกสาร — บอกว่ารูปนี้คือรูปอะไร
+        self.now_cap = tk.Label(self.now, text="", font=(FONT, 10),
+                                bg=BLUE_BG, fg=BLACK, wraplength=480,
+                                justify="left", anchor="w")
+        self.now_cap.pack(fill="x", anchor="w", padx=14, pady=(0, 12))
+
         self.hint = tk.Label(root, text=f"กด {config.hotkey().upper()}",
                              font=(FONT, 11, "bold"), bg=BG, fg=BLACK)
         self.hint.pack(pady=(8, 0))
@@ -312,7 +319,7 @@ class App:
 
         self._bind_wheel()
 
-        for i, (no, name) in enumerate(self.steps):
+        for i, (no, name, caption) in enumerate(self.steps):
             row = tk.Frame(self.inner, bg=CARD, cursor="hand2")
             row.pack(fill="x")
 
@@ -322,14 +329,18 @@ class App:
                            fg=GREY, width=3, anchor="w")
             num.pack(side="left")
             nm = tk.Label(row, text=name, font=(FONT, 10), bg=CARD,
-                          fg=BLACK, anchor="w", padx=0)
-            nm.pack(side="left", fill="x", expand=True, pady=5)
+                          fg=BLACK, anchor="w", padx=0, width=9)
+            nm.pack(side="left", pady=5)
+            # ข้อความกำกับรูป — ตัวจริงที่บอกว่ารูปนี้คือรูปอะไร
+            cap = tk.Label(row, text=_ellipsis(caption or "", 40), font=(FONT, 9),
+                           bg=CARD, fg=GREY, anchor="w")
+            cap.pack(side="left", fill="x", expand=True)
 
-            for w in (row, mark, num, nm):
+            for w in (row, mark, num, nm, cap):
                 w.bind("<Button-1>", lambda e, k=i: self.jump(k))
 
             tk.Frame(self.inner, bg=LINE, height=1).pack(fill="x")
-            self.rows.append((row, mark, num, nm))
+            self.rows.append((row, mark, num, nm, cap))
 
     def _bind_wheel(self):
         """ผูก wheel แบบ bind_all — Windows ส่ง wheel ไปที่ widget ที่ focus ไม่ใช่ใต้เมาส์
@@ -401,22 +412,24 @@ class App:
                 self._paint(w, GREEN_BG)
             self.now_no.config(text="✓", fg=GREEN, bg=GREEN_BG)
             self.now_name.config(text="ครบทุกจุดแล้ว", bg=GREEN_BG)
+            self.now_cap.config(text="", bg=GREEN_BG)
             self.hint.config(text="กดที่ขั้นตอนในรายการเพื่อกลับไปแก้")
         else:
-            no, name = self.steps[self.idx]
+            no, name, caption = self.steps[self.idx]
             self.now.config(bg=BLUE_BG, highlightbackground=BLUE)
             for w in self.now.winfo_children():
                 self._paint(w, BLUE_BG)
             self.now_no.config(text=str(no), fg=BLUE, bg=BLUE_BG)
             n = self.shots[self.idx]
             self.now_name.config(text=f"{name}   ({n} รูป)" if n else name, bg=BLUE_BG)
+            self.now_cap.config(text=_ellipsis(caption or "", 150), bg=BLUE_BG)
             self.hint.config(text=f"กด {config.hotkey().upper()} = ใส่รูปลงขั้นตอนนี้")
 
         if self.revert_btn is not None:
             has_image = self.idx < len(self.steps) and self.shots[self.idx] > 0
             self.revert_btn.config(state="normal" if has_image else "disabled")
 
-        for i, (row, mark, num, nm) in enumerate(self.rows):
+        for i, (row, mark, num, nm, cap) in enumerate(self.rows):
             st = self.state[i]
             cur = (i == self.idx)
             bg = BLUE_BG if cur else CARD
@@ -428,7 +441,7 @@ class App:
                 mark.config(text="○", fg=LINE)
                 nm.config(fg=BLACK)
             nm.config(font=(FONT, 10, "bold") if cur else (FONT, 10))
-            for w in (row, mark, num, nm):
+            for w in (row, mark, num, nm, cap):
                 w.config(bg=bg)
 
         self._scroll_to(self.idx)
@@ -467,7 +480,7 @@ class App:
                                fg=AMBER)
             return
 
-        no, name = self.steps[self.idx]
+        no, name, _cap = self.steps[self.idx]
         result = capture.capture_to_word(self._inserter(no))
         now = datetime.datetime.now()
 
@@ -515,7 +528,7 @@ class App:
     def _picker_slots(self, table_index):
         """จุดของตารางนั้น + รูปที่ฝังอยู่จริง ให้หน้าเลือกรูปเทียบว่าใช้ไฟล์ไหนไปแล้ว"""
         slots = pic_target.load_slots(self.template, table_index)
-        return ([(no, name, placed) for no, name, _total, placed in slots],
+        return ([(no, name, cap, placed) for no, name, _total, placed, cap in slots],
                 pic_target.slot_images(self.template, table_index))
 
     def _place_file(self, table_index, slot_no, src):
@@ -537,7 +550,7 @@ class App:
         """เอารูปที่จุดปัจจุบันออก คืนเป็น <pic> — ใช้ตอนแคปผิดแล้วอยากแคปใหม่"""
         if self.idx >= len(self.steps) or not self.shots[self.idx]:
             return
-        no, name = self.steps[self.idx]
+        no, name, _cap = self.steps[self.idx]
         ok, msg = pic_target.revert_image(self.template, self.table_index, no)
         now = datetime.datetime.now()
 
@@ -555,7 +568,7 @@ class App:
     def jump(self, i):
         self.idx = i
         self.refresh()
-        no, name = self.steps[i]
+        no, name, _cap = self.steps[i]
         n = self.shots[i]
         if n and self.pic_mode:
             # โหมด <pic> 1 จุด = 1 รูป การวางทับคือแทนที่ ไม่ใช่ต่อท้าย
