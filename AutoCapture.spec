@@ -7,8 +7,8 @@ a = Analysis(
     binaries=[],
     datas=[],
     hiddenimports=[
-        'ui_word', 'ui_picker', 'capture', 'pic_target', 'word_target',
-        'config', 'single_instance',
+        'ui_word', 'ui_picker', 'ui_region', 'capture', 'pic_target',
+        'word_target', 'config', 'single_instance',
         'win32com', 'win32com.client', 'pythoncom', 'pywintypes',
     ],
     excludes=['openpyxl'],
