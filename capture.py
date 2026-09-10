@@ -75,21 +75,24 @@ class Result:
         self.message = message
 
 
-def capture_to_word(insert):
+def capture_to_word(insert, img=None):
     """แคป 1 ครั้ง แล้วใส่ลง Word ผ่าน insert(image_path) -> (สำเร็จ, ข้อความ)
 
     รับ insert เป็น callback เพราะปลายทางต่างกันตามโหมด
     (ช่อง Actual Result ของขั้นตอน หรือ แทน <pic>) แต่ขั้นตอนแคป/กัน error
     เหมือนกัน ภาพเก็บลง captures/ เสมอ ถ้า Word พังก็หยิบไปแปะเองได้
+
+    img = ภาพที่เลือกพื้นที่มาแล้ว ถ้าไม่ส่งมาจะแคปหน้าต่างที่อยู่หน้าสุดให้
     """
     now = datetime.datetime.now()
 
-    win = active_window()
-    if win is None:
-        return Result(False, "หาหน้าต่างไม่เจอ ข้าม")
-    _, bbox = win
+    if img is None:
+        win = active_window()
+        if win is None:
+            return Result(False, "หาหน้าต่างไม่เจอ ข้าม")
+        _, bbox = win
+        img = capture(bbox)
 
-    img = capture(bbox)
     path = save_image(img, now, config.WORD_IMAGE_WIDTH)
 
     try:

@@ -15,6 +15,7 @@ import capture
 import config
 import pic_target
 import ui_picker
+import ui_region
 import word_target
 
 BG = "#f7f7f5"
@@ -37,6 +38,19 @@ DONE, TODO = "done", "todo"
 def _ellipsis(text, limit):
     """ตัดข้อความยาวๆ กันดันของข้างๆ ตกขอบ"""
     return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
+def region_hotkey():
+    """ปุ่มลากเลือกพื้นที่ — ต่อ modifier จากปุ่มหลัก ผู้ใช้จึงจำแค่ปุ่มเดียว
+
+    เปลี่ยนปุ่มหลักเป็น f3 ปุ่มนี้ก็กลายเป็น shift+f3 ตามไปเอง
+    ถ้าปุ่มหลักมี modifier ครบทุกตัวแล้วก็ไม่มีปุ่มที่สองให้ใช้
+    """
+    hk = config.hotkey()
+    for mod in ("shift", "ctrl", "alt"):
+        if mod not in hk:
+            return f"{mod}+{hk}"
+    return None
 
 
 def choose_document(parent=None):
@@ -152,7 +166,17 @@ class App:
         self.list_wrap = None
         self._load_document()
 
+        self._bind_hotkeys()
+
+    def _bind_hotkeys(self):
+        """ปุ่มหลัก = ทั้งหน้าต่าง / ปุ่มหลัก + modifier = ลากเลือกพื้นที่
+
+        keyboard จับคู่จากเซ็ตปุ่มที่กดค้างอยู่ทั้งหมด สองปุ่มนี้จึงไม่ยิงชนกัน
+        """
         keyboard.add_hotkey(config.hotkey(), self.on_hotkey, suppress=False)
+        region = region_hotkey()
+        if region:
+            keyboard.add_hotkey(region, self.on_region_hotkey, suppress=False)
 
     def _fill_tables(self):
         """ใส่ตารางทั้งหมดของเอกสารนี้ลง dropdown
@@ -394,7 +418,7 @@ class App:
             return
         # ถอดปุ่มเก่าก่อนผูกใหม่ ไม่งั้นทั้งสองปุ่มยิงพร้อมกัน
         keyboard.unhook_all_hotkeys()
-        keyboard.add_hotkey(new, self.on_hotkey, suppress=False)
+        self._bind_hotkeys()
         self.hotkey_var.set(new)
         self.status.config(text=f"เปลี่ยนปุ่มลัดเป็น {new.upper()} แล้ว", fg=GREEN)
         self.refresh()   # อัปเดตข้อความ hint ให้ตรงปุ่มใหม่
@@ -423,7 +447,11 @@ class App:
             n = self.shots[self.idx]
             self.now_name.config(text=f"{name}   ({n} รูป)" if n else name, bg=BLUE_BG)
             self.now_cap.config(text=_ellipsis(caption or "", 150), bg=BLUE_BG)
-            self.hint.config(text=f"กด {config.hotkey().upper()} = ใส่รูปลงขั้นตอนนี้")
+            region = region_hotkey()
+            hint = f"กด {config.hotkey().upper()} = ทั้งหน้าต่าง"
+            if region:
+                hint += f"   |   {region.upper()} = ลากเลือกพื้นที่"
+            self.hint.config(text=hint)
 
         if self.revert_btn is not None:
             has_image = self.idx < len(self.steps) and self.shots[self.idx] > 0
@@ -468,7 +496,23 @@ class App:
         # hotkey มาจากอีก thread — โยนเข้า main loop ก่อนแตะ widget
         self.root.after(0, self.shoot)
 
-    def shoot(self):
+    def on_region_hotkey(self):
+        self.root.after(0, self.shoot_region)
+
+    def shoot_region(self):
+        """ลากเลือกพื้นที่ก่อน แล้วค่อยใส่ลงจุดปัจจุบัน"""
+        if self.idx >= len(self.steps):
+            self.status.config(text="ครบทุกจุดแล้ว — กดที่ขั้นตอนในรายการถ้าต้องการแก้",
+                               fg=AMBER)
+            return
+
+        img = ui_region.select_region(self.root)
+        if img is None:
+            self.status.config(text="ยกเลิก — ไม่ได้เลือกพื้นที่", fg=GREY)
+            return
+        self.shoot(img)
+
+    def shoot(self, img=None):
         # กันกดรัวเกินไป
         now_t = time.monotonic()
         if now_t - self._last_shot < 0.4:
@@ -481,7 +525,7 @@ class App:
             return
 
         no, name, _cap = self.steps[self.idx]
-        result = capture.capture_to_word(self._inserter(no))
+        result = capture.capture_to_word(self._inserter(no), img=img)
         now = datetime.datetime.now()
 
         if not result.ok:
